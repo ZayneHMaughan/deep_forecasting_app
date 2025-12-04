@@ -74,10 +74,27 @@ class prepare_data:
             df = df.rename(columns={df.columns[0]: 'ds'})
         elif date_col in df.columns:
             df = df.rename(columns={date_col: 'ds'})
-
-        # Rename target column
-        if target_col in df.columns:
-            df = df.rename(columns={target_col: 'y'})
+# Create column mapping for renaming
+        rename_dict = {}
+        
+        # Map date column to 'ds'
+        if date_col in df.columns and date_col != 'ds':
+            rename_dict[date_col] = 'ds'
+        
+        # Map target column to 'y'
+        if target_col in df.columns and target_col != 'y':
+            rename_dict[target_col] = 'y'
+        
+        # Apply renaming
+        if rename_dict:
+            df = df.rename(columns=rename_dict)
+        
+        # Ensure ds and y columns exist
+        if 'ds' not in df.columns:
+            raise ValueError(f"Date column '{date_col}' not found in dataframe. Available columns: {df.columns.tolist()}")
+        
+        if 'y' not in df.columns:
+            raise ValueError(f"Target column '{target_col}' not found in dataframe. Available columns: {df.columns.tolist()}")
 
         # Add unique_id
         df['unique_id'] = unique_id
