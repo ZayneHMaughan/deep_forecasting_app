@@ -9,14 +9,20 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
 import io
+import sys 
+from pathlib import Path
+# Add the full_pipeline directory to path to import forecasting modules
+pipeline_path = Path(__file__).parent / 'modules'
+sys.path.insert(0, str(pipeline_path))
 
 # Import your custom modules
-from data_config import prepare_data
-from stats_forecast import StatForecaster
-from ml_forecast import MLForecaster
-from deep_forecast import DeepForecaster
-from modeling import ForecasterModel
-#from graph_utils import GraphUtils
+from modules.data_config import prepare_data
+from modules.stats_models import StatModels
+from modules.ml_models import MLModels
+from modules.deep_models import DeepModels
+from modules.modeling import CompareModels
+from modules.graph_utils import GraphUtils
+import pickle
 
 
 # ==========================================
@@ -110,8 +116,8 @@ data_source = st.sidebar.radio(
 
 if data_source == "Upload File":
     uploaded_file = st.sidebar.file_uploader(
-        "Upload CSV or Excel file",
-        type=['csv', 'xlsx']
+        "Upload CSV",
+        type=['csv']
     )
     if uploaded_file:
         st.session_state.data = load_data(uploaded_file)
@@ -152,7 +158,7 @@ st.markdown("Compare multiple forecasting models on your time series data")
 # ==========================================
 # TAB 1: DATA OVERVIEW
 # ==========================================
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Data Overview", "🤖 Train Models", "📉 Compare Models", "📋 Results"])
+tab1, tab2, tab3 = st.tabs(["📊 Data Overview", "🤖 Train Models", "📉 Compare Models"])
 
 with tab1:
     st.header("Data Overview")
@@ -187,6 +193,9 @@ with tab1:
                 'Missing %': (data.isnull().sum().values / len(data) * 100).round(2)
             })
             st.dataframe(missing_df[missing_df['Missing Count'] > 0], use_container_width=True)
+            st.text("There are three different ways to adjust missing data: Imputing, filling, and dropping the observations. ")
+            st.markdown("For more information please follow this link: [scikit-learn Impute Docs](https://scikit-learn.org/stable/modules/impute.html)")
+
         
         # Visualize time series
         if date_col and target_col:
@@ -220,6 +229,7 @@ with tab2:
         st.subheader("Train/Test Split")
         split_ratio = st.slider("Training data percentage", 50, 90, 80)
         split_index = int(len(st.session_state.data) * split_ratio / 100)
+        #max_steps = st.number_input("Max Training Steps", value=100)
         
         col1, col2 = st.columns(2)
         with col1:
@@ -234,20 +244,23 @@ with tab2:
         
         with col1:
             st.markdown("**Statistical Models**")
-            train_arima = st.checkbox("ARIMA", value=True)
-            train_sarima = st.checkbox("SARIMA")
-            train_ets = st.checkbox("Exponential Smoothing")
+            train_auto_arima = st.checkbox("Auto_ARIMA", value=True)
+            train_arima = st.checkbox("ARIMA")
+            train_sarima = st.checkbox("Auto_ETS")
+            train_sn= st.checkbox("Seasonal Naive")
+            train_rwd = st.checkbox("Random Walk with Drift")
         
         with col2:
             st.markdown("**Machine Learning Models**")
             train_rf = st.checkbox("Random Forest", value=True)
-            train_gb = st.checkbox("Gradient Boosting")
+            train_gb = st.checkbox("Light Gradient Boosting")
             train_xgb = st.checkbox("XGBoost")
+            train_cat = st.checkbox("Catboost")
         
         with col3:
             st.markdown("**Deep Learning Models**")
-            train_lstm = st.checkbox("LSTM", value=True)
-            epochs = st.number_input("Epochs (Deep Learning)", 10, 200, 50)
+            train_lstm = st.checkbox("RNN", value=True)
+            #epochs = st.number_input("Epochs (Deep Learning)", 10, 200, 50)
         
         # Train button
         if st.button("🚀 Train Selected Models", type="primary"):
@@ -259,60 +272,91 @@ with tab2:
             test_data = st.session_state.data.iloc[split_index:].copy()
             
             # Rename columns for consistency
-            train_data = train_data.rename(columns={date_col: 'date', target_col: 'y'})
-            test_data = test_data.rename(columns={date_col: 'date', target_col: 'y'})
+            train_data = train_data.rename(columns={date_col: 'ds', target_col: 'y'})
+            test_data = test_data.rename(columns={date_col: 'ds', target_col: 'y'})
             
             trained_models = []
-            total_models = sum([train_arima, train_sarima, train_ets, 
+            total_models = sum([train_arima, train_sarima, train_sn, 
                               train_rf, train_gb, train_xgb, train_lstm])
             current_model = 0
             
             # Train Statistical Models
-            if train_arima:
-                status_text.text("Training ARIMA...")
+            if train_auto_arima:
+                status_text.text("Training Auto_ARIMA...")
                 try:
-                    arima = StatForecaster(
-                        model_type="arima",
+                    arima = StatModels(
+                        models="auto_arima",
                         clean_method=clean_method,
                         impute_strategy=impute_strategy
                     )
                     arima.fit(train_data, target_col='y', order=(2, 1, 2))
                     trained_models.append(arima)
-                    st.success("✓ ARIMA trained successfully")
+                    st.success("Auto_ARIMA trained successfully")
                 except Exception as e:
-                    st.error(f"✗ ARIMA training failed: {str(e)}")
+                    st.error(f"Auto_ARIMA training failed: {str(e)}")
+                current_model += 1
+                progress_bar.progress(current_model / total_models)
+
+            if train_arima:
+                status_text.text("Training ARIMA...")
+                try:
+                    arima = StatModels(
+                        models="arima",
+                        clean_method=clean_method,
+                        impute_strategy=impute_strategy
+                    )
+                    arima.fit(train_data, target_col='y', order=(2, 1, 2))
+                    trained_models.append(arima)
+                    st.success("ARIMA trained successfully")
+                except Exception as e:
+                    st.error(f"ARIMA training failed: {str(e)}")
                 current_model += 1
                 progress_bar.progress(current_model / total_models)
             
             if train_sarima:
-                status_text.text("Training SARIMA...")
+                status_text.text("Training Auto_ETS...")
                 try:
-                    sarima = StatForecaster(
-                        model_type="sarima",
+                    sarima = StatModels(
+                        models="auto_ets",
                         clean_method=clean_method,
                         impute_strategy=impute_strategy
                     )
                     sarima.fit(train_data, target_col='y', order=(1, 1, 1), seasonal_order=(1, 1, 1, 12))
                     trained_models.append(sarima)
-                    st.success("✓ SARIMA trained successfully")
+                    st.success("✓ Auto_ETS trained successfully")
                 except Exception as e:
-                    st.error(f"✗ SARIMA training failed: {str(e)}")
+                    st.error(f"✗ Auto_ETS training failed: {str(e)}")
                 current_model += 1
                 progress_bar.progress(current_model / total_models)
             
-            if train_ets:
-                status_text.text("Training Exponential Smoothing...")
+            if train_sn:
+                status_text.text("Training Seasonal Naive...")
                 try:
-                    ets = StatForecaster(
-                        model_type="ets",
+                    ets = StatModels(
+                        models="seasonal_naive",
                         clean_method=clean_method,
                         impute_strategy=impute_strategy
                     )
                     ets.fit(train_data, target_col='y')
                     trained_models.append(ets)
-                    st.success("✓ ETS trained successfully")
+                    st.success("✓ Seasonal Naive trained successfully")
                 except Exception as e:
-                    st.error(f"✗ ETS training failed: {str(e)}")
+                    st.error(f"✗ Seasonal Naive training failed: {str(e)}")
+                current_model += 1
+                progress_bar.progress(current_model / total_models)
+            if train_rwd:
+                status_text.text("Training Random Walk w Drift...")
+                try:
+                    ets = StatModels(
+                        models="random_walk_w_drift",
+                        clean_method=clean_method,
+                        impute_strategy=impute_strategy
+                    )
+                    ets.fit(train_data, target_col='y')
+                    trained_models.append(ets)
+                    st.success("✓ Random Walk trained successfully")
+                except Exception as e:
+                    st.error(f"✗ Random Walk training failed: {str(e)}")
                 current_model += 1
                 progress_bar.progress(current_model / total_models)
             
@@ -320,14 +364,14 @@ with tab2:
             if train_rf:
                 status_text.text("Training Random Forest...")
                 try:
-                    rf = MLForecaster(
-                        model_type="random_forest",
+                    rf = MLModels(
+                        models=["random_forest"],
                         clean_method=clean_method,
                         impute_strategy=impute_strategy,
                         n_estimators=100,
                         random_state=42
                     )
-                    rf.fit(train_data, target_col='y', lags=5)
+                    rf.fit(train_data, target_col='y')
                     trained_models.append(rf)
                     st.success("✓ Random Forest trained successfully")
                 except Exception as e:
@@ -336,59 +380,97 @@ with tab2:
                 progress_bar.progress(current_model / total_models)
             
             if train_gb:
-                status_text.text("Training Gradient Boosting...")
+                status_text.text("Training Light Gradient Boosting...")
                 try:
-                    gb = MLForecaster(
-                        model_type="gradient_boosting",
+                    gb = MLModels(
+                        models="lgbm",
                         clean_method=clean_method,
                         impute_strategy=impute_strategy,
                         n_estimators=100,
                         random_state=42
                     )
-                    gb.fit(train_data, target_col='y', lags=5)
+                    gb.fit(train_data, target_col='y')
                     trained_models.append(gb)
-                    st.success("✓ Gradient Boosting trained successfully")
+                    st.success(" Light Gradient Boosting trained successfully")
                 except Exception as e:
-                    st.error(f"✗ Gradient Boosting training failed: {str(e)}")
+                    st.error(f"Light Gradient Boosting training failed: {str(e)}")
                 current_model += 1
                 progress_bar.progress(current_model / total_models)
             
             if train_xgb:
                 status_text.text("Training XGBoost...")
                 try:
-                    xgb = MLForecaster(
-                        model_type="xgboost",
+                    xgb = MLModels(
+                        models="xgboost",
                         clean_method=clean_method,
                         impute_strategy=impute_strategy,
                         n_estimators=100,
                         random_state=42
                     )
-                    xgb.fit(train_data, target_col='y', lags=5)
+                    xgb.fit(train_data, target_col='y')
                     trained_models.append(xgb)
-                    st.success("✓ XGBoost trained successfully")
+                    st.success("XGBoost trained successfully")
                 except Exception as e:
-                    st.error(f"✗ XGBoost training failed: {str(e)}")
+                    st.error(f"XGBoost training failed: {str(e)}")
                 current_model += 1
                 progress_bar.progress(current_model / total_models)
+
+                if train_xgb:
+                    status_text.text("Training Catboost...")
+                    try:
+                        xgb = MLModels(
+                            models="catboost",
+                            clean_method=clean_method,
+                            impute_strategy=impute_strategy,
+                            n_estimators=100,
+                            random_state=42
+                        )
+                        xgb.fit(train_data, target_col='y')
+                        trained_models.append(xgb)
+                        st.success("Catboost trained successfully")
+                    except Exception as e:
+                        st.error(f"Catboost training failed: {str(e)}")
+                    current_model += 1
+                    progress_bar.progress(current_model / total_models)
             
-            # Train Deep Learning Models
             if train_lstm:
-                status_text.text("Training LSTM...")
-                try:
-                    lstm = DeepForecaster(
-                        model_type="lstm",
+                st.info("Training deep learning LSTM model...")
+                # Take last 50 points or fewer
+                subset_size = min(50, len(train_data))
+                train_data_subset = train_data.iloc[-subset_size:].copy()
+
+                # Safe initialization and training with cache
+                @st.cache_resource
+                def get_rnn_model(clean_method, impute_strategy):
+                    return DeepModels(
+                        models=["rnn"],
                         clean_method=clean_method,
                         impute_strategy=impute_strategy,
-                        hidden_size=64,
-                        num_layers=2
+                        h=3,          # small horizon
+                        max_steps=5  # small steps
                     )
-                    lstm.fit(train_data, target_col='y', seq_length=10, epochs=epochs, batch_size=32)
-                    trained_models.append(lstm)
-                    st.success("✓ LSTM trained successfully")
+
+                @st.cache_resource
+                def train_rnn_model(_dl_model, train_df):
+                    _dl_model.fit(train_df, target_col='y', date_col='ds', val_size=5)
+                    return _dl_model
+
+                
+                try:
+                    lstm_model = get_rnn_model(clean_method, impute_strategy)
+                    lstm_model = train_rnn_model(lstm_model, train_data_subset)
+                    trained_models.append(lstm_model)
+                   
+                    st.success("Deep learning model trained!")
+
+
                 except Exception as e:
-                    st.error(f"✗ LSTM training failed: {str(e)}")
+                        st.error(f"Training failed: {e}")
+                        
+
                 current_model += 1
                 progress_bar.progress(current_model / total_models)
+
             
             # Store trained models and data split
             st.session_state.trained_models = trained_models
@@ -397,7 +479,8 @@ with tab2:
             st.session_state.split_index = split_index
             
             status_text.text("Training complete!")
-            st.balloons()
+            
+            #st.balloons()
 
 
 # ==========================================
@@ -410,9 +493,13 @@ with tab3:
         st.warning("Please train models first in the Train Models tab.")
     else:
         st.success(f"✓ {len(st.session_state.trained_models)} models ready for comparison")
+        horizon = st.number_input("Forecast Horizon", value=10, min_value = 1)
+         # Initialize GraphUtils if not already
+        if 'graph_utils' not in st.session_state:
+            st.session_state.graph_utils = GraphUtils()
         
         # Initialize comparator
-        comparator = ForecasterModel()
+        comparator = CompareModels()
         
         # Add all trained models
         for model in st.session_state.trained_models:
@@ -421,6 +508,7 @@ with tab3:
         # Evaluate models
         if st.button("📊 Evaluate Models", type="primary"):
             with st.spinner("Evaluating models..."):
+                train_data = st.session_state.train_data
                 test_data = st.session_state.test_data
                 y_test = test_data['y'].values
                 
@@ -428,11 +516,13 @@ with tab3:
                 try:
                     # For statistical models, we just need the number of steps
                     metrics_df = comparator.evaluate_all(
-                        X_test=test_data,
-                        y_test=y_test
+                        test_data=test_data,
+                        train_data=train_data, 
+                        h =horizon
                     )
                     
                     st.session_state.metrics_df = metrics_df
+                    st.write(metrics_df)
                     st.session_state.comparator = comparator
                     st.session_state.y_test = y_test
                     
@@ -440,6 +530,7 @@ with tab3:
                     
                 except Exception as e:
                     st.error(f"Error during evaluation: {str(e)}")
+
         
         # Display results if available
         if st.session_state.comparator and hasattr(st.session_state, 'metrics_df'):
@@ -447,8 +538,14 @@ with tab3:
             st.dataframe(st.session_state.metrics_df, use_container_width=True)
             
             # Best model
-            best_model = st.session_state.comparator.get_best_model()
-            st.info(f"🏆 Best Model: **{best_model['model_name']}** (RMSE: {best_model['metrics']['RMSE']:.4f})")
+             # Best model
+            try:
+                best_model = st.session_state.comparator.get_best_model()
+                st.info(f"🏆 Best Model: **{best_model['model_name']}** (RMSE: {best_model['metrics']['RMSE']:.4f})")
+            except ValueError:
+                st.warning("No models successfully evaluated yet")
+                best_model = None
+            
             
             # Visualization
             st.subheader("Visualizations")
@@ -484,60 +581,70 @@ with tab3:
                 st.pyplot(fig)
                 plt.close()
             
-            # Residuals for best model
-            st.subheader(f"Residuals Analysis: {best_model['model_name']}")
-            best_pred = st.session_state.comparator.predictions[best_model['model_name']]
-            fig, axes = st.session_state.graph_utils.plot_residuals(
-                st.session_state.y_test,
-                best_pred,
-                model_name=best_model['model_name']
-            )
-            st.pyplot(fig)
-            plt.close()
+            # # Residuals for best model
+            # st.subheader(f"Residuals Analysis: {best_model['model_name']}")
+            # best_pred = st.session_state.comparator.predictions[best_model['model_name']]
+            # # Make sure it's a numpy array
+            # if isinstance(best_pred, pd.Series):
+            #     best_pred = best_pred.values
+            # elif isinstance(best_pred, pd.DataFrame):
+            #     best_pred = best_pred.iloc[:, 0].values  # take first column
+
+            # y_true = st.session_state.y_test
+            # if isinstance(y_true, pd.Series):
+            #     y_true = y_true.values
+            # elif isinstance(y_true, pd.DataFrame):
+            #     y_true = y_true.iloc[:, 0].values
+
+            # fig, axes = st.session_state.graph_utils.plot_residuals(
+            #     y_true,
+            #     best_pred,
+            #     model_name=best_model['model_name']
+            # )
 
 
 # ==========================================
 # TAB 4: RESULTS & EXPORT
 # ==========================================
-with tab4:
-    st.header("Results & Export")
+# with tab4:
+#     st.header("Results & Export")
     
-    if st.session_state.comparator and hasattr(st.session_state, 'metrics_df'):
-        # Generate report
-        st.subheader("📋 Detailed Report")
-        report = st.session_state.comparator.generate_report()
-        st.text(report)
+#     if st.session_state.comparator and hasattr(st.session_state, 'metrics_df'):
+#         # Generate report
+#         st.subheader("📋 Detailed Report")
+#         report = st.session_state.comparator.generate_report()
+#         st.text(report)
         
-        # Download report
-        st.download_button(
-            label="📥 Download Report (TXT)",
-            data=report,
-            file_name=f"model_comparison_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-            mime="text/plain"
-        )
+#         # Download report
+#         st.download_button(
+#             label="📥 Download Report (TXT)",
+#             data=report,
+#             file_name=f"model_comparison_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+#             mime="text/plain"
+#         )
         
-        # Download metrics CSV
-        csv = st.session_state.metrics_df.to_csv(index=False)
-        st.download_button(
-            label="📥 Download Metrics (CSV)",
-            data=csv,
-            file_name=f"model_metrics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv"
-        )
+#         # Download metrics CSV
+#         csv = st.session_state.metrics_df.to_csv(index=False)
+#         st.download_button(
+#             label="📥 Download Metrics (CSV)",
+#             data=csv,
+#             file_name=f"model_metrics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+#             mime="text/csv"
+#         )
         
-        # Download predictions
-        predictions_df = pd.DataFrame(st.session_state.comparator.predictions)
-        predictions_df['Actual'] = st.session_state.y_test
-        predictions_csv = predictions_df.to_csv(index=False)
-        st.download_button(
-            label="📥 Download Predictions (CSV)",
-            data=predictions_csv,
-            file_name=f"predictions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv"
-        )
+#         # Download predictions
+#         predictions_df = pd.DataFrame(st.session_state.comparator.predictions)
+#         predictions_df['Actual'] = st.session_state.y_test
+#         predictions_csv = predictions_df.to_csv(index=False)
+#         st.download_button(
+#             label="📥 Download Predictions (CSV)",
+#             data=predictions_csv,
+#             file_name=f"predictions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+#             mime="text/csv"
+#         )
         
-    else:
-        st.info("Train and evaluate models to see results here.")
+#     else:
+#         st.info("Train and evaluate models to see results here.")
 
 
 # ==========================================

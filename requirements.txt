@@ -5,13 +5,14 @@ streamlit>=1.28.0
 pandas>=2.0.0
 numpy>=1.24.0
 plotly>=5.17.0
+seaborn>=0.13.2
 
 # Nixtla forecasting libraries (Core)
 statsforecast>=1.5.0
 mlforecast>=0.10.0
 neuralforecast>=1.6.0
 utilsforecast>=0.0.10
-
+#mlforecast.lag_transforms
 # Machine Learning libraries (for MLForecast)
 scikit-learn>=1.3.0
 xgboost>=2.0.0
