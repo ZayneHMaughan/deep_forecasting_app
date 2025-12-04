@@ -277,7 +277,7 @@ with tab2:
             
             trained_models = []
             total_models = sum([train_arima, train_sarima, train_sn, 
-                              train_rf, train_gb, train_xgb, train_lstm])
+                              train_rf, train_gb, train_xgb, train_lstm, train_cat, train_auto_arima, train_rwd])
             current_model = 0
             
             # Train Statistical Models
@@ -301,7 +301,7 @@ with tab2:
                 status_text.text("Training ARIMA...")
                 try:
                     arima = StatModels(
-                        models="arima",
+                        models=["arima"],
                         clean_method=clean_method,
                         impute_strategy=impute_strategy
                     )
@@ -317,7 +317,7 @@ with tab2:
                 status_text.text("Training Auto_ETS...")
                 try:
                     sarima = StatModels(
-                        models="auto_ets",
+                        models=["auto_ets"],
                         clean_method=clean_method,
                         impute_strategy=impute_strategy
                     )
@@ -333,7 +333,7 @@ with tab2:
                 status_text.text("Training Seasonal Naive...")
                 try:
                     ets = StatModels(
-                        models="seasonal_naive",
+                        models=["seasonal_naive"],
                         clean_method=clean_method,
                         impute_strategy=impute_strategy
                     )
@@ -348,7 +348,7 @@ with tab2:
                 status_text.text("Training Random Walk w Drift...")
                 try:
                     ets = StatModels(
-                        models="random_walk_w_drift",
+                        models=["random_walk_w_drift"],
                         clean_method=clean_method,
                         impute_strategy=impute_strategy
                     )
@@ -383,7 +383,7 @@ with tab2:
                 status_text.text("Training Light Gradient Boosting...")
                 try:
                     gb = MLModels(
-                        models="lgbm",
+                        models=["lgbm"],
                         clean_method=clean_method,
                         impute_strategy=impute_strategy,
                         n_estimators=100,
@@ -401,7 +401,7 @@ with tab2:
                 status_text.text("Training XGBoost...")
                 try:
                     xgb = MLModels(
-                        models="xgboost",
+                        models=["xgboost"],
                         clean_method=clean_method,
                         impute_strategy=impute_strategy,
                         n_estimators=100,
