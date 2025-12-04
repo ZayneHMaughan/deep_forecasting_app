@@ -9,14 +9,19 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
 import io
+import sys 
+from pathlib import Path
+# Add the full_pipeline directory to path to import forecasting modules
+pipeline_path = Path(__file__).parent / 'modules'
+sys.path.insert(0, str(pipeline_path))
 
 # Import your custom modules
-from data_config import prepare_data
-from Stats_models import StatModels
-from ML_Models import MLModels
-from Deep_models import DeepModels
-from modeling import CompareModels
-from graph_utils import GraphUtils
+from modules.data_config import prepare_data
+from modules.stats_models import StatModels
+from modules.ml_models import MLModels
+from modules.deep_models import DeepModels
+from modules.modeling import CompareModels
+from modules.graph_utils import GraphUtils
 import pickle
 
 
@@ -188,6 +193,9 @@ with tab1:
                 'Missing %': (data.isnull().sum().values / len(data) * 100).round(2)
             })
             st.dataframe(missing_df[missing_df['Missing Count'] > 0], use_container_width=True)
+            st.text("There are three different ways to adjust missing data: Imputing, filling, and dropping the observations. ")
+            st.markdown("For more information please follow this link: [scikit-learn Impute Docs](https://scikit-learn.org/stable/modules/impute.html)")
+
         
         # Visualize time series
         if date_col and target_col:
@@ -236,15 +244,18 @@ with tab2:
         
         with col1:
             st.markdown("**Statistical Models**")
-            train_arima = st.checkbox("ARIMA", value=True)
-            train_sarima = st.checkbox("SARIMA")
-            train_ets = st.checkbox("Exponential Smoothing")
+            train_auto_arima = st.checkbox("Auto_ARIMA", value=True)
+            train_arima = st.checkbox("ARIMA")
+            train_sarima = st.checkbox("Auto_ETS")
+            train_sn= st.checkbox("Seasonal Naive")
+            train_rwd = st.checkbox("Random Walk with Drift")
         
         with col2:
             st.markdown("**Machine Learning Models**")
             train_rf = st.checkbox("Random Forest", value=True)
             train_gb = st.checkbox("Light Gradient Boosting")
             train_xgb = st.checkbox("XGBoost")
+            train_cat = st.checkbox("Catboost")
         
         with col3:
             st.markdown("**Deep Learning Models**")
@@ -265,11 +276,27 @@ with tab2:
             test_data = test_data.rename(columns={date_col: 'ds', target_col: 'y'})
             
             trained_models = []
-            total_models = sum([train_arima, train_sarima, train_ets, 
+            total_models = sum([train_arima, train_sarima, train_sn, 
                               train_rf, train_gb, train_xgb, train_lstm])
             current_model = 0
             
             # Train Statistical Models
+            if train_auto_arima:
+                status_text.text("Training Auto_ARIMA...")
+                try:
+                    arima = StatModels(
+                        models="auto_arima",
+                        clean_method=clean_method,
+                        impute_strategy=impute_strategy
+                    )
+                    arima.fit(train_data, target_col='y', order=(2, 1, 2))
+                    trained_models.append(arima)
+                    st.success("Auto_ARIMA trained successfully")
+                except Exception as e:
+                    st.error(f"Auto_ARIMA training failed: {str(e)}")
+                current_model += 1
+                progress_bar.progress(current_model / total_models)
+
             if train_arima:
                 status_text.text("Training ARIMA...")
                 try:
@@ -287,34 +314,49 @@ with tab2:
                 progress_bar.progress(current_model / total_models)
             
             if train_sarima:
-                status_text.text("Training SARIMA...")
+                status_text.text("Training Auto_ETS...")
                 try:
                     sarima = StatModels(
-                        models="sarima",
+                        models="auto_ets",
                         clean_method=clean_method,
                         impute_strategy=impute_strategy
                     )
                     sarima.fit(train_data, target_col='y', order=(1, 1, 1), seasonal_order=(1, 1, 1, 12))
                     trained_models.append(sarima)
-                    st.success("✓ SARIMA trained successfully")
+                    st.success("✓ Auto_ETS trained successfully")
                 except Exception as e:
-                    st.error(f"✗ SARIMA training failed: {str(e)}")
+                    st.error(f"✗ Auto_ETS training failed: {str(e)}")
                 current_model += 1
                 progress_bar.progress(current_model / total_models)
             
-            if train_ets:
-                status_text.text("Training Exponential Smoothing...")
+            if train_sn:
+                status_text.text("Training Seasonal Naive...")
                 try:
                     ets = StatModels(
-                        models="ets",
+                        models="seasonal_naive",
                         clean_method=clean_method,
                         impute_strategy=impute_strategy
                     )
                     ets.fit(train_data, target_col='y')
                     trained_models.append(ets)
-                    st.success("✓ ETS trained successfully")
+                    st.success("✓ Seasonal Naive trained successfully")
                 except Exception as e:
-                    st.error(f"✗ ETS training failed: {str(e)}")
+                    st.error(f"✗ Seasonal Naive training failed: {str(e)}")
+                current_model += 1
+                progress_bar.progress(current_model / total_models)
+            if train_rwd:
+                status_text.text("Training Random Walk w Drift...")
+                try:
+                    ets = StatModels(
+                        models="random_walk_w_drift",
+                        clean_method=clean_method,
+                        impute_strategy=impute_strategy
+                    )
+                    ets.fit(train_data, target_col='y')
+                    trained_models.append(ets)
+                    st.success("✓ Random Walk trained successfully")
+                except Exception as e:
+                    st.error(f"✗ Random Walk training failed: {str(e)}")
                 current_model += 1
                 progress_bar.progress(current_model / total_models)
             
@@ -372,6 +414,24 @@ with tab2:
                     st.error(f"XGBoost training failed: {str(e)}")
                 current_model += 1
                 progress_bar.progress(current_model / total_models)
+
+                if train_xgb:
+                    status_text.text("Training Catboost...")
+                    try:
+                        xgb = MLModels(
+                            models="catboost",
+                            clean_method=clean_method,
+                            impute_strategy=impute_strategy,
+                            n_estimators=100,
+                            random_state=42
+                        )
+                        xgb.fit(train_data, target_col='y')
+                        trained_models.append(xgb)
+                        st.success("Catboost trained successfully")
+                    except Exception as e:
+                        st.error(f"Catboost training failed: {str(e)}")
+                    current_model += 1
+                    progress_bar.progress(current_model / total_models)
             
             if train_lstm:
                 st.info("Training deep learning LSTM model...")
