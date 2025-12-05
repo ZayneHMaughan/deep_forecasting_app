@@ -9,7 +9,7 @@ from xgboost import XGBRegressor
 from numba import njit
 #import window_ops.expanding as expanding
 #import window_ops.rolling as rolling
-from data_config import prepare_data
+from data_config import PrepareData
 from typing import Optional, Dict, Any, List, Literal, Union
 import numpy as np
 import pandas as pd
@@ -47,7 +47,7 @@ class MLModels:
         **model_params
     ):
         """Initialize ML models using MLForecast."""
-        self.data_prep = prepare_data(
+        self.data_prep = PrepareData(
             options=clean_method,
             imputed_options=impute_strategy
         )
@@ -147,6 +147,8 @@ class MLModels:
             date_col=date_col,
             unique_id=unique_id
         )
+
+        prepared = prepared.dropna(subset=['y']).copy()
         
             # Initialize MLForecast for one_step or multi_step
         self.mlf = MLForecast(
@@ -160,7 +162,7 @@ class MLModels:
         self.mlf.fit(prepared)
         self.fitted_data = prepared
         
-        #print(f"✓ {self.model_name} fitted successfully with {len(self.models)} models")
+
         return self
     
     def one_step_forecast(
@@ -176,8 +178,8 @@ class MLModels:
 
         Iterative one-step forecast: at each t, train on all actuals up to t-1.
         """
-        train_long = prepare_data.wrangle_data(train_df, target_col, date_col, unique_id)
-        test_long = prepare_data.wrangle_data(test_df, target_col, date_col, unique_id)
+        train_long = self.data_prep.wrangle_data(train_df, target_col, date_col, unique_id)
+        test_long = self.data_prep.wrangle_data(test_df, target_col, date_col, unique_id)
 
         forecasts_list = []
         metrics_dict = {}
@@ -254,6 +256,8 @@ class MLModels:
         Uses MLForecast default h-step prediction behavior.
         """
         train_long = self.data_prep.wrangle_data(train_df, target_col, date_col, unique_id)
+        train_long = train_long.dropna(subset=['y']).copy()
+
 
         forecasts_list = []
         metrics_dict = {}

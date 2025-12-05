@@ -9,7 +9,7 @@ from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import SimpleImputer, KNNImputer, IterativeImputer
 
 
-class prepare_data:
+class PrepareData:
     def __init__(self,
                  options: Literal["impute", "fill", "drop"] = "fill", 
                  imputed_options: Literal["simple", "knn", "iterative"] = "simple",
@@ -20,26 +20,31 @@ class prepare_data:
 
     def clean_miss_data(self, data: pd.DataFrame) -> pd.DataFrame:
         df = data.copy()
+
+        # Only treat the target column as missing data
+        target = 'y'
+
         if self.options == "impute":
             if self.imputed_options == "simple":
-                imp = SimpleImputer(missing_values=np.nan, strategy="mean")
-                df_imputed = imp.fit_transform(df.select_dtypes(include=[np.number]))
-                df[df.select_dtypes(include=[np.number]).columns] = df_imputed
-      
-            if self.imputed_options == "knn":
-                imp = KNNImputer(n_neighbors=5, weights="uniform")
-                df_imputed = imp.fit_transform(df.select_dtypes(include=[np.number]))
-                df[df.select_dtypes(include=[np.number]).columns] = df_imputed
-            if self.imputed_options == "iterative":
+                imp = SimpleImputer(strategy="mean")
+            elif self.imputed_options == "knn":
+                imp = KNNImputer(n_neighbors=5)
+            elif self.imputed_options == "iterative":
                 imp = IterativeImputer(max_iter=10, random_state=24)
-                df_imputed = imp.fit_transform(df.select_dtypes(include=[np.number])) 
-                df[df.select_dtypes(include=[np.number]).columns] = df_imputed
+            else:
+                imp = None
+
+            if imp:
+                df[[target]] = imp.fit_transform(df[[target]])
+
         elif self.options == "fill":
-           df = df.fillna(method="ffill").fillna(method="bfill")
-        else: 
-            df = df.dropna()
+            df[target] = df[target].ffill()
+
+        else:  # drop
+            df = df.dropna(subset=[target])
+
         return df
-        
+
     def wrangle_data(
         self,
         data: pd.DataFrame,

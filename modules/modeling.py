@@ -13,67 +13,16 @@ class CompareModels:
     def add_model(self, model, name: str = None):
         """Add a model to comparison."""
         model_name = name or getattr(model, 'model_name', f'Model_{len(self.models)}')
-        
-        # CRITICAL: Handle all cases where model_name might not be a string
-        if isinstance(model_name, list):
-            model_name = '_'.join(str(m) for m in model_name)
-        elif not isinstance(model_name, str):
-            model_name = str(model_name)
-        
+        model_name = str(model_name)
+
         self.models.append({'name': model_name, 'model': model})
-        st.write(f"✓ Added {model_name} to comparison")
+        st.write(f"Added {model_name}")
 
-    @staticmethod
-    def _format_predictions(pred, model_name: str):
-        """
-        Ensure predictions are returned as a DataFrame with consistent columns
-        for CompareModels.
-        """
-        if isinstance(pred, pd.DataFrame):
-            df = pred.copy()
-            if 'unique_id' not in df.columns:
-                df['unique_id'] = model_name
-            if 'ds' not in df.columns:
-                df['ds'] = np.arange(len(df))
-        else:
-            # Assume 1D array or Series
-            df = pd.DataFrame({
-                'y_pred': np.array(pred),
-                'unique_id': model_name,
-                'ds': np.arange(len(pred))
-            })
-        return df
-
-    @staticmethod
-    def _compute_metrics(model, y_true, y_pred, model_name=None):
-        """Compute standard metrics."""
-        y_true = np.array(y_true)
-        y_pred = np.array(y_pred)
-        min_len = min(len(y_true), len(y_pred))
-        y_true, y_pred = y_true[:min_len], y_pred[:min_len]
-
-        # Try calling model.get_metrics if available
-        if hasattr(model, 'get_metrics'):
-            metrics = model.get_metrics(y_true, y_pred, model_name=model_name)
-        else:
-            # Compute manually
-            mae = np.mean(np.abs(y_true - y_pred))
-            mse = np.mean((y_true - y_pred) ** 2)
-            rmse = np.sqrt(mse)
-            mape = np.mean(np.abs((y_true - y_pred) / (y_true + 1e-10))) * 100
-            metrics = {
-                'MODEL': model_name or getattr(model, 'model_name', 'Unknown'),
-                'MAE': mae,
-                'MSE': mse,
-                'RMSE': rmse,
-                'MAPE': mape
-            }
-        return metrics
-
-    def evaluate_all(self, train_data: pd.DataFrame, test_data: pd.DataFrame, h: int = 10) -> pd.DataFrame:
+    def evaluate_all(self, train_data: pd.DataFrame, test_data: pd.DataFrame, h: int = 10):
         """Evaluate all models and store predictions + metrics."""
         self.metrics = []
         self.predictions = {}
+        self.results = {}
 
         if len(self.models) == 0:
             st.warning("No models to evaluate.")
@@ -82,13 +31,9 @@ class CompareModels:
         for model_info in self.models:
             name = model_info['name']
             model = model_info['model']
-            
-            # ENSURE name is a string
-            if not isinstance(name, str):
-                name = str(name)
 
             try:
-                # Determine forecast type
+                # ---- CALL THE RIGHT FORECAST METHOD ------------------------------
                 if hasattr(model, "one_step_forecast") and h == 1:
                     result = model.one_step_forecast(
                         train_df=train_data,
@@ -115,13 +60,11 @@ class CompareModels:
                         unique_id='series_1'
                     )
                 elif hasattr(model, "predict"):
-                    preds = model.predict(h=h)
-                    if isinstance(preds, dict):
-                        result = preds
-                    elif isinstance(preds, pd.DataFrame):
-                        result = {'forecasts': preds, 'metrics': None}
+                    raw = model.predict(h=h)
+                    if isinstance(raw, dict):
+                        result = raw
                     else:
-                        st.warning(f"{name} predict() did not return expected format, skipping.")
+                        st.warning(f"{name} predict() did not return dict with 'forecasts', skipping.")
                         continue
                 else:
                     st.warning(f"Model {name} has no predict() method, skipping.")
@@ -132,105 +75,176 @@ class CompareModels:
                     st.warning(f"{name} did not return a DataFrame for forecasts, skipping.")
                     continue
 
-                pred_cols = [c for c in forecast_df.columns if c not in ['unique_id', 'ds', 'y_true', 'y']]
-                if len(pred_cols) == 0:
-                    st.warning(f"No valid prediction columns for {name}, skipping.")
+                if 'ds' in forecast_df.columns:
+                    forecast_df['ds'] = pd.to_datetime(forecast_df['ds'])
+
+                # Store raw forecast with model name as key
+                self.predictions[name] = forecast_df.copy()
+
+                # ---- FIND PREDICTION COLUMN(S) -------------------------------------
+                pred_cols = [
+                    c for c in forecast_df.columns
+                    if c not in ["unique_id", "ds", "y", "y_true"]
+                ]
+
+                if not pred_cols:
+                    st.warning(f"{name}: no prediction column found in {forecast_df.columns.tolist()}")
                     continue
 
-                model_metrics = result.get('metrics', {})
+                pred_col = pred_cols[0]
 
-                for col in pred_cols:
-                    y_pred = forecast_df[col].values
-                    y_true = test_data['y'].values[:len(y_pred)]
-                    model_name_full = f"{name}_{col}" if len(pred_cols) > 1 else name
-                    
-                    # ENSURE model_name_full is a string
-                    if not isinstance(model_name_full, str):
-                        model_name_full = str(model_name_full)
+                # ---- STANDARDIZE TIMESTAMPS ----------------------------------------
+                if 'ds' in forecast_df.columns:
+                    forecast_df['ds'] = pd.to_datetime(forecast_df['ds'], errors='coerce')
 
-                    if isinstance(model_metrics, dict) and col in model_metrics:
-                        metrics = model_metrics[col].copy()
-                        metrics['MODEL'] = model_name_full
-                    elif isinstance(model_metrics, dict) and 'MAE' in model_metrics:
-                        metrics = model_metrics.copy()
-                        metrics['MODEL'] = model_name_full
-                    else:
-                        errors = y_true - y_pred
-                        metrics = {
-                            'MODEL': model_name_full,
-                            'MAE': float(np.mean(np.abs(errors))),
-                            'RMSE': float(np.sqrt(np.mean(errors ** 2))),
-                            'MAPE': float(np.mean(np.abs(errors / (y_true + 1e-10))) * 100)
-                        }
+                test_data_copy = test_data.copy()
+                if test_data_copy['ds'].dtype != 'datetime64[ns]':
+                    test_data_copy['ds'] = pd.to_datetime(test_data_copy['ds'], errors='coerce')
 
-                    self.metrics.append(metrics)
-                    # Store as list (hashable)
-                    self.predictions[model_name_full] = y_pred.tolist() if hasattr(y_pred, 'tolist') else list(y_pred)
-                    st.write(f"✓ Evaluated {model_name_full}: RMSE={metrics['RMSE']:.4f}")
+                # ---- ALIGN FORECASTS WITH TEST DATA ---------------------------------
+                merged = pd.merge(
+                    test_data_copy[['ds', 'y']],
+                    forecast_df[['ds', pred_col]],
+                    on='ds',
+                    how='inner'
+                )
+
+                if merged.empty:
+                    st.error(f"{name}: no overlapping timestamps between test and forecast")
+                    continue
+
+                y_true = merged["y"].values
+                y_pred = merged[pred_col].values
+
+                # ---- CHECK FOR NAN/INF VALUES --------------------------------------
+                nan_in_true = np.isnan(y_true).sum()
+                nan_in_pred = np.isnan(y_pred).sum()
+                inf_in_true = np.isinf(y_true).sum()
+                inf_in_pred = np.isinf(y_pred).sum()
+
+                if nan_in_true > 0 or nan_in_pred > 0 or inf_in_true > 0 or inf_in_pred > 0:
+                    st.warning(f"{name}: Data quality issues detected:")
+                    st.write(f"  - NaN in actuals: {nan_in_true}")
+                    st.write(f"  - NaN in predictions: {nan_in_pred}")
+                    st.write(f"  - Inf in actuals: {inf_in_true}")
+                    st.write(f"  - Inf in predictions: {inf_in_pred}")
+
+                    # Show sample of problematic values
+                    if nan_in_pred > 0:
+                        st.write(f"  Sample predictions: {y_pred[:10]}")
+
+                    # Option 1: Skip this model
+                    # continue
+
+                    # Option 2: Remove NaN/Inf values
+                    valid_mask = ~(np.isnan(y_true) | np.isnan(y_pred) | np.isinf(y_true) | np.isinf(y_pred))
+                    y_true_clean = y_true[valid_mask]
+                    y_pred_clean = y_pred[valid_mask]
+
+                    if len(y_true_clean) == 0:
+                        st.error(f"{name}: No valid data points after removing NaN/Inf, skipping")
+                        continue
+
+                    st.info(f"{name}: Using {len(y_true_clean)}/{len(y_true)} valid data points")
+                    y_true = y_true_clean
+                    y_pred = y_pred_clean
+
+                # ---- COMPUTE METRICS ----------------------------------------------
+                errors = y_true - y_pred
+
+                # Additional safety checks
+                if len(errors) == 0:
+                    st.error(f"{name}: No errors to compute metrics from")
+                    continue
+
+                mae = float(np.mean(np.abs(errors)))
+                rmse = float(np.sqrt(np.mean(errors ** 2)))
+
+                # Safe MAPE calculation
+                if np.all(y_true == 0):
+                    mape = np.nan
+                    st.warning(f"{name}: Cannot compute MAPE (all actual values are zero)")
+                else:
+                    # Avoid division by zero
+                    mape_values = np.abs(errors / np.where(y_true == 0, 1e-10, y_true))
+                    mape = float(np.mean(mape_values) * 100)
+
+                metrics = {
+                    "MODEL": name,
+                    "MAE": mae,
+                    "RMSE": rmse,
+                    "MAPE": mape,
+                    "N_POINTS": len(y_true)  # Track how many points were used
+                }
+
+                # Verify metrics are valid
+                if np.isnan(rmse) or np.isinf(rmse):
+                    st.error(f"{name}: RMSE is {rmse}, skipping this model")
+                    st.write(f"  Debug - errors: {errors[:10]}")
+                    st.write(f"  Debug - y_true: {y_true[:10]}")
+                    st.write(f"  Debug - y_pred: {y_pred[:10]}")
+                    continue
+
+                self.metrics.append(metrics)
+
+                # Store complete result
+                self.results[name] = {
+                    'forecast': forecast_df.copy(),
+                    'metrics': metrics,
+                    'predictions': y_pred,
+                    'actuals': y_true,
+                    'merged': merged.copy()
+                }
+
+                st.success(f"✓ {name} evaluated (RMSE = {metrics['RMSE']:.4f}, N = {metrics['N_POINTS']})")
 
             except Exception as e:
-                st.error(f"✗ Error evaluating {name}: {str(e)}")
                 import traceback
+                st.error(f"✗ Error evaluating {name}: {e}")
                 st.error(traceback.format_exc())
 
-        if len(self.metrics) == 0:
-            st.warning("No metrics could be computed. Returning empty DataFrame.")
-            return pd.DataFrame()
-        else:
-            metrics_df = pd.DataFrame(self.metrics)
-            
-            # Ensure MODEL column exists
-            if 'MODEL' not in metrics_df.columns:
-                if 'model' in metrics_df.columns:
-                    metrics_df.rename(columns={'model': 'MODEL'}, inplace=True)
-                else:
-                    metrics_df.rename(columns={metrics_df.columns[0]: 'MODEL'}, inplace=True)
-            
-            # CRITICAL: Ensure 'model' column contains ONLY strings
-            metrics_df['model'] = metrics_df['MODEL'].astype(str)
-            
-            # Verify no lists remain
-            for col in metrics_df.columns:
-                if metrics_df[col].apply(lambda x: isinstance(x, list)).any():
-                    st.warning(f"Column {col} contains lists, converting to strings")
-                    metrics_df[col] = metrics_df[col].apply(lambda x: str(x) if isinstance(x, list) else x)
-            
-            return metrics_df
-
-
-
-
-    def _format_predictions(self, pred: pd.DataFrame, model_name: str) -> pd.DataFrame:
-        """
-            Ensure predictions are a proper DataFrame for evaluation.
-        Handles multi-index and multi-column predictions.
-        """
-        if isinstance(pred, pd.Series):
-            pred = pred.to_frame(name='prediction')
-
-        if isinstance(pred.index, pd.MultiIndex):
-            pred = pred.reset_index()
-
-        # If no explicit prediction column, use the last one
-        cols = [c for c in pred.columns if c not in ['unique_id', 'ds']]
-        if 'prediction' not in cols and len(cols) > 0:
-            pred = pred.rename(columns={cols[-1]: 'prediction'})
-
-        return pred
-
-
-    def get_best_model(self, metric='RMSE'):
-        """Return best model based on metric."""
+        # ---- RETURN SUMMARY FOR ALL MODELS (OUTSIDE LOOP) ------------------------
         if not self.metrics:
-            st.warning("No metrics available.")
-            return None
+            st.warning("⚠️ No valid metrics were computed for any model!")
+            return pd.DataFrame()
+
         metrics_df = pd.DataFrame(self.metrics)
-        if metric not in metrics_df.columns:
-            st.warning(f"Metric '{metric}' not found. Using RMSE instead.")
-            metric = 'RMSE'
-        best_idx = metrics_df[metric].idxmin()
-        best_model_name = metrics_df.loc[best_idx, 'MODEL']
-        return {
-            'model_name': best_model_name,
-            'metrics': metrics_df.loc[best_idx].to_dict()
-        }
+
+        # Show summary of data quality
+        st.write(f"📊 Successfully evaluated {len(metrics_df)} models")
+        if 'N_POINTS' in metrics_df.columns:
+            st.write(f"📈 Data points used: {metrics_df['N_POINTS'].min()} to {metrics_df['N_POINTS'].max()}")
+
+        return metrics_df
+
+    def get_best_model(self, metric="RMSE"):
+        if not self.metrics:
+            return None
+
+        df = pd.DataFrame(self.metrics)
+        if metric not in df.columns:
+            metric = "RMSE"
+
+        best_row = df.loc[df[metric].idxmin()]
+        return {"model_name": best_row["MODEL"], "metrics": best_row.to_dict()}
+
+    def _standardize_predictions(self, preds, train_index, horizon):
+        # Convert DataFrame to Series if needed
+        if isinstance(preds, pd.DataFrame):
+            preds = preds.iloc[:, 0]
+
+        # Ensure preds is numeric
+        preds = pd.to_numeric(preds, errors="coerce")
+
+        # Build correct forecast index
+        forecast_index = pd.date_range(
+            start=train_index[-1],
+            periods=horizon + 1,
+            freq=train_index.freq
+        )[1:]  # skip the last training timestamp
+
+        preds.index = forecast_index
+        return preds
+
+
+

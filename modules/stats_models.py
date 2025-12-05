@@ -3,7 +3,7 @@
 import pandas as pd
 import numpy as np
 from typing import Dict, Any, Optional, List, Union
-from data_config import prepare_data
+from data_config import PrepareData
 from statsforecast import StatsForecast
 from statsforecast.models import (
     AutoARIMA,
@@ -25,7 +25,7 @@ class StatModels:
         season_length: int = 7
     ):
         """Initialize statistical models using StatsForecast."""
-        self.data_prep = prepare_data(
+        self.data_prep = PrepareData(
             options=clean_method,
             imputed_options=impute_strategy
         )
@@ -36,15 +36,21 @@ class StatModels:
         
         # Initialize models
         if models is None:
-            models = ['auto_arima']
-        
-        # Store as list for internal use
+            model_names = ['auto_arima']
+            # Normalize models argument to a list of names
+            # Store as list for internal use
         self.model_list = models if isinstance(models, list) else [models]
-        
-        # CRITICAL FIX: Convert to string for external use
-        self.model_name = '_'.join(self.model_list)
-        
+
+        # FIXED: Just use the model name directly, don't append class name
+        if len(self.model_list) == 1:
+                self.model_name = self.model_list[0]
+        else:
+                # For multiple models, join with underscore
+                self.model_name = '_'.join(self.model_list)
+
         self.models = self._initialize_models(self.model_list)
+
+
         
     def _initialize_models(self, model_names: List[str]):
         """Initialize StatsForecast models."""
@@ -117,8 +123,8 @@ class StatModels:
         Returns predictions and metrics.
         """
         # Prepare data
-        train_data = prepare_data.wrangle_data(train_df, target_col, date_col, unique_id)
-        test_data = prepare_data.wrangle_data(test_df, target_col, date_col, unique_id)
+        train_data =self.data_prep.wrangle_data(train_df, target_col, date_col, unique_id)
+        test_data = self.data_prep.wrangle_data(test_df, target_col, date_col, unique_id)
 
         preds = []
         actuals = test_data['y'].values
@@ -159,13 +165,13 @@ class StatModels:
         return {'forecasts':forecast_df, 'metrics':metrics}
 
     def predict_multi_step(
-    self,
-    h: int = 10,
-    test_df: Optional[pd.DataFrame] = None,
-    target_col: str = 'y',
-    date_col: str = 'ds',
-    unique_id: str = 'series_1'
-) -> Dict[str, Union[pd.DataFrame, Dict[str, float]]]:
+        self,
+        h: int = 10,
+        test_df: Optional[pd.DataFrame] = None,
+        target_col: str = 'y',
+        date_col: str = 'ds',
+        unique_id: str = 'series_1'
+    ) -> Dict[str, Union[pd.DataFrame, Dict[str, float]]]:
         """
         Multi-step forecast using StatsForecast with recursive predictions.
         Returns both predictions and optional metrics.
@@ -178,18 +184,22 @@ class StatModels:
 
         # Use StatsForecast recursive forecast
         forecast_df = self.sf.forecast(df=train_long, h=h)
-        
-        # DEBUG: Print what columns we actually have
-        print(f"DEBUG: Forecast columns: {forecast_df.columns.tolist()}")
-        print(f"DEBUG: Forecast shape: {forecast_df.shape}")
-        print(f"DEBUG: First few rows:\n{forecast_df.head()}")
+        # Map StatsForecast class names to our model names
+        column_mapping = {
+            'AutoARIMA': 'auto_arima',
+            'AutoETS': 'auto_ets',
+            'ARIMA': 'arima',
+            'SeasonalNaive': 'seasonal_naive',
+            'RandomWalkWithDrift': 'random_walk_w_drift'
+        }
+        # Rename prediction columns to match our model naming convention
+        forecast_df = forecast_df.rename(columns=column_mapping)
 
         # Get prediction columns - be more flexible with column names
         # StatsForecast might use different naming conventions
         exclude_cols = ['unique_id', 'ds', 'cutoff', 'y']
         model_cols = [c for c in forecast_df.columns if c not in exclude_cols]
-        
-        print(f"DEBUG: Model columns found: {model_cols}")
+
         
         if len(model_cols) == 0:
             print(f"ERROR: All columns: {forecast_df.columns.tolist()}")
