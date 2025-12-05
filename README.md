@@ -2,6 +2,7 @@
 
 **DeepForecasting** is an interactive Streamlit app for time series forecasting using modern machine learning models, including Nixtla’s MLForecast framework. It allows users to train, evaluate, and visualize forecasts from multiple ML models, including Random Forest, LightGBM, XGBoost, and CatBoost.
 
+Check out App at https://deepforecastingapp-gnbqbdyzxwqlkmnx9nbtyd.streamlit.app/
 ---
 
 ## 📐 Architecture
